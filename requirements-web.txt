@@ -1,0 +1,11 @@
+flask
+gunicorn
+gTTS
+deep-translator
+bcrypt
+Pillow
+opencv-python-headless
+numpy
+pytesseract
+python-dotenv
+requests

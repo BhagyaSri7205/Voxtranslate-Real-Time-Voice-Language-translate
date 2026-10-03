@@ -1,0 +1,6 @@
+venv
+.env
+.secret_key
+voxtranslate.db
+__pycache__
+*.pyc

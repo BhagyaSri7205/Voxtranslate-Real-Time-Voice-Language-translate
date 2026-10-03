@@ -1,0 +1,10 @@
+@"
+venv/
+.venv/
+env/
+.env
+.secret_key
+voxtranslate.db
+__pycache__/
+*.pyc
+"@ | Set-Content .gitignore

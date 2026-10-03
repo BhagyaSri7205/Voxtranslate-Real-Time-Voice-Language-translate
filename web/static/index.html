@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#241238"><link rel="apple-touch-icon" href="/static/icons/icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<title>VoxTranslate</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#E8D5F7;background:#150A20 url(/static/assets/bg_gradient.png) center/cover fixed;min-height:100vh}
+button{cursor:pointer;border:0;border-radius:10px;padding:11px 18px;font-weight:bold;color:#fff;background:linear-gradient(90deg,#A020F0,#E83EBD)}
+button:hover{filter:brightness(1.15)}button.alt{background:#35164A;color:#CDB7E9}button.red{background:#FF6B6B}
+input,select,textarea{width:100%;background:#21102F;color:#fff;border:1px solid #7B2CBF;border-radius:10px;padding:11px;font-size:16px;font-family:inherit}
+textarea{min-height:130px;resize:vertical}label{font-size:13px;color:#CDB7E9;display:block;margin:12px 0 5px}
+#app{display:flex;min-height:100vh}
+#side{width:230px;background:#241238;padding:28px 14px;display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+#side h1{color:#FF8FD8;font-size:23px;text-align:center;margin:0 0 4px}#side p{text-align:center;margin:0 0 18px;font-size:13px;font-weight:bold}
+#side button{text-align:left;background:transparent;color:#E8D5F7}#side button.on{background:linear-gradient(90deg,#7B2CBF,#E83EBD)}
+#main{flex:1;padding:34px 40px;overflow:auto;max-height:100vh}
+h2{color:#FF8FD8;margin:0 0 18px}
+.card{background:rgba(33,16,47,.85);border:1px solid #6326A8;border-radius:18px;padding:22px;margin-bottom:18px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:200px}
+.lang{display:flex;align-items:center;gap:8px}.lang img{width:28px;height:auto}
+.out{background:#150A20;border:1px solid #7B2CBF;border-radius:10px;padding:14px;min-height:90px;white-space:pre-wrap}
+.btns{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}.msg{margin-top:10px;font-size:14px;color:#FF8FD8}
+.bubble{padding:10px 14px;border-radius:14px;margin:8px 0;max-width:80%}.A{background:#6326A8}.B{background:#35164A;margin-left:auto;border:1px solid #E83EBD}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:9px;border-bottom:1px solid #35164A;text-align:left;vertical-align:top}th{color:#FF8FD8}
+#auth{max-width:420px;margin:8vh auto;padding:0 16px}#auth h1{text-align:center;color:#FF8FD8}
+a{color:#FF8FD8;cursor:pointer}video{width:100%;max-height:340px;border-radius:12px;background:#000}
+.hide{display:none}.sq{aspect-ratio:1/1;width:100%;min-height:0;resize:none;overflow:auto}.sqrow{display:grid;grid-template-columns:repeat(2,minmax(0,380px));gap:18px;justify-content:center}
+@media(max-width:700px){.sqrow{grid-template-columns:minmax(0,1fr)}}.pg{display:flex;gap:16px}.pgb{flex:1;min-width:0}.avh{width:190px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+@media(max-width:1000px){.pg{flex-direction:column}.avh{width:100%;order:-1}}
+#side .s{display:none}
+@media(max-width:800px){#app{display:block}
+ #side{position:fixed;left:0;right:0;bottom:0;width:100%;flex-direction:row;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));gap:2px;z-index:10;border-top:1px solid #6326A8}
+ #side h1,#side p,#side .l{display:none}
+ #side button{flex:1;min-width:0;padding:6px 2px;text-align:center;font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px;border-radius:8px}
+ #side .e{font-size:20px}#side .s{display:block}
+ #main{max-height:none;padding:16px 14px calc(96px + env(safe-area-inset-bottom,0px));overflow:visible}
+ body{padding-top:env(safe-area-inset-top,0px)}h2{font-size:20px}.card{padding:16px}}
+</style></head><body>
+<div id="root"></div>
+<audio id="player"></audio>
+<script>
+const $=s=>document.querySelector(s), root=$('#root'), player=$('#player');
+let LANGS={}, user=null, page='home', camStream=null, conv=null;
+const flag=n=>`/static/assets/flags/${n.toLowerCase()}_22.png`;
+async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+ if(r.status===401&&p!=='login'){user=null;showAuth();throw 0}return r}
+const J=async(p,m,b)=>(await api(p,m,b)).json();
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const langSel=(id,auto,def)=>`<div class="lang"><img id="${id}f" src="${flag(def)}"><select id="${id}" onchange="$('#${id}f').src=flag(this.selectedOptions[0].dataset.n)">${auto?'<option value="auto" data-n="auto">🌐 Auto Detect (any language)</option>':''}${Object.entries(LANGS).map(([n,c])=>`<option value="${c}" data-n="${n}" ${n===def&&!auto?'selected':''}>${n}</option>`).join('')}</select></div>`;
+
+// ---------- audio ----------
+const LOC={en:'en-US',te:'te-IN',hi:'hi-IN',ta:'ta-IN',kn:'kn-IN',ml:'ml-IN',bn:'bn-IN',mr:'mr-IN',gu:'gu-IN',pa:'pa-IN',ur:'ur-PK',ko:'ko-KR',ja:'ja-JP','zh-CN':'zh-CN',fr:'fr-FR',de:'de-DE',es:'es-ES',ru:'ru-RU',ar:'ar-SA',pt:'pt-BR',it:'it-IT'};
+const loc=c=>LOC[c]||c, sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let VOICES=[];const loadV=()=>{try{VOICES=speechSynthesis.getVoices()}catch(e){}};loadV();try{speechSynthesis.onvoiceschanged=loadV}catch(e){}
+function voiceFor(code){const b=loc(code).toLowerCase(),p=b.split('-')[0];
+ return VOICES.find(v=>v.lang.toLowerCase().replace('_','-')===b)||VOICES.find(v=>v.lang.toLowerCase().replace('_','-').split('-')[0]===p)}
+const CACHE={};
+function fetchAudio(text,lang){const k=lang+'|'+text;return CACHE[k]||(CACHE[k]=fetch(`/api/tts?lang=${encodeURIComponent(lang)}&text=${encodeURIComponent(text)}`).then(r=>{if(!r.ok)throw 0;return r.blob()}).then(b=>URL.createObjectURL(b)).catch(()=>{delete CACHE[k];return null}))}
+function prefetch(text,lang){if(text&&!voiceFor(lang))fetchAudio(text,lang)}
+let gen=0;
+// Fast path: the browser's own voice (instant). Fallback: server audio, pre-loaded right after translating.
+function speak(text,lang){return new Promise(async res=>{stopSpeak();if(!text||!text.trim())return res(false);const my=++gen;
+ AV&&AV.talk(true);const done=ok=>{if(my===gen&&AV)AV.talk(false);res(ok)};const v=voiceFor(lang);
+ if(v){const parts=text.match(/[^.!?।。؟]+[.!?।。؟]*/g)||[text];let i=0;
+  const next=()=>{if(my!==gen)return done(false);if(i>=parts.length)return done(true);
+   const u=new SpeechSynthesisUtterance(parts[i++].trim());u.voice=v;u.lang=v.lang;u.onend=next;u.onerror=()=>done(false);speechSynthesis.speak(u)};
+  return next()}
+ const url=await fetchAudio(text,lang);if(my!==gen||!url)return done(false);
+ player.onended=()=>done(true);player.onerror=()=>done(false);player.src=url;player.play().catch(()=>done(false))})}
+function stopSpeak(){gen++;try{speechSynthesis.cancel()}catch(e){}player.onended=player.onerror=null;player.pause();AV&&AV.talk(false)}
+function listen(lang){return new Promise((res,rej)=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR)return rej({fatal:1,msg:'Speech recognition needs Chrome or Edge.'});const r=new SR();r.lang=loc(lang);r.interimResults=false;r.maxAlternatives=1;
+ r.onresult=e=>res(e.results[0][0].transcript);
+ r.onerror=e=>{const fatal=['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error);
+  rej({fatal,msg:e.error==='no-speech'||e.error==='aborted'?'':({'not-allowed':'Allow microphone access in the browser (lock icon in the address bar).','audio-capture':'No microphone found.','language-not-supported':'This browser cannot recognise that language.','network':'Speech recognition needs internet.'}[e.error]||'Mic error: '+e.error)})};
+ r.onend=()=>res('');conv&&(conv.rec=r);try{r.start()}catch(e){rej({fatal:0,msg:''})}})}
+
+// ---------- talking avatar (same character as the desktop app) ----------
+let AV=null;
+class Avatar{constructor(host,size=130){this.w=Math.round(size*1.35);this.h=Math.round(size*2.35);const c=document.createElement('canvas');c.width=this.w;c.height=this.h;host.appendChild(c);
+ this.c=c;this.x=c.getContext('2d');this.t=Math.random()*6.28;this.bp=0;this.talking=false;this.loop()}
+ talk(v){this.talking=v}
+ loop(){if(!this.c.isConnected)return;this.draw();setTimeout(()=>requestAnimationFrame(()=>this.loop()),40)}
+ draw(){const {w,h,x}=this,t=(this.t+=0.05);x.clearRect(0,0,w,h);
+  const cx=w*.46,hr=w*.2,hcy=h*.11,nt=hcy+hr*.85,sy=nt+h*.02,sw=w*.46,hw=w*.34,tb=h*.52,hb=h*.55,lb=h*.92,fs=w*.13;
+  const dy=Math.sin(t)*h*.006,dx=Math.sin(t*.6)*w*.01,hair='#3B1F52',skin='#FFD9B3',shirt='#A020F0',sd='#7B2CBF',pants='#2A1440',ol='#FF8FD8',P=Math.PI/180;
+  const rect=(a,b,c,d,f)=>{x.fillStyle=f;x.fillRect(a,b,c-a,d-b)};
+  const oval=(a,b,c,d,f,s,lw)=>{x.beginPath();x.ellipse((a+c)/2,(b+d)/2,(c-a)/2,(d-b)/2,0,0,7);if(f){x.fillStyle=f;x.fill()}if(s){x.strokeStyle=s;x.lineWidth=lw||1;x.stroke()}};
+  const line=(a,b,c,d,col,lw)=>{x.beginPath();x.moveTo(a,b);x.lineTo(c,d);x.strokeStyle=col;x.lineWidth=lw;x.lineCap='round';x.stroke()};
+  x.save();x.translate(dx,dy);
+  rect(cx-hw*.32,hb,cx-w*.02,lb,pants);rect(cx+w*.02,hb,cx+hw*.32,lb,pants);
+  oval(cx-hw*.32-fs*.3,lb-6,cx-hw*.02+fs*.3,lb+8,hair);oval(cx+hw*.02-fs*.3,lb-6,cx+hw*.32+fs*.3,lb+8,hair);
+  line(cx+sw*.42,sy,cx+sw*.55,tb*.95,sd,w*.09);
+  x.beginPath();x.moveTo(cx-sw/2,sy);x.lineTo(cx+sw/2,sy);x.lineTo(cx+hw/2,tb);x.lineTo(cx-hw/2,tb);x.closePath();x.fillStyle=shirt;x.fill();x.strokeStyle=ol;x.lineWidth=2;x.lineJoin='round';x.stroke();
+  oval(cx-sw/2,sy-sw*.18,cx+sw/2,sy+sw*.18,shirt,ol,2);
+  let hx,hy;if(this.talking){hx=cx-sw*.62+Math.sin(t*3.2)*sw*.18;hy=sy+(tb-sy)*.35}else{hx=cx-sw*.6;hy=tb*.9}
+  line(cx-sw*.42,sy,hx,hy,shirt,w*.09);oval(hx-w*.045,hy-w*.045,hx+w*.045,hy+w*.045,skin);
+  rect(cx-w*.045,hcy+hr*.65,cx+w*.045,nt,skin);
+  oval(cx-hr*1.08,hcy-hr*1.15,cx+hr*1.08,hcy+hr*.55,hair);oval(cx-hr,hcy-hr*.85,cx+hr,hcy+hr*1.05,skin);
+  x.beginPath();x.ellipse(cx,hcy-hr*.45,hr*1.05,hr*.8,0,-160*P,-20*P);x.closePath();x.fillStyle=hair;x.fill();
+  const er=hr*.1;oval(cx-hr*.38-er,hcy-er,cx-hr*.38+er,hcy+er,'#2A0F3D');oval(cx+hr*.38-er,hcy-er,cx+hr*.38+er,hcy+er,'#2A0F3D');
+  x.beginPath();x.ellipse(cx,hcy+hr*.3,hr*.4,hr*.25,0,20*P,160*P);x.strokeStyle='#7A4A2F';x.lineWidth=2;x.stroke();
+  oval(cx-hr*.75-3,hcy+hr*.15-3,cx-hr*.75+3,hcy+hr*.15+3,'#FF9EC4');oval(cx+hr*.75-3,hcy+hr*.15-3,cx+hr*.75+3,hcy+hr*.15+3,'#FF9EC4');
+  x.restore();
+  const bx=cx+sw*.85,by=sy+h*.02,br=w*.15,fy=Math.sin(t*1.4)*br*.15;oval(bx-br,by-br+fy,bx+br,by+br+fy,'#E83EBD','#FFD9F3',2);
+  this.bp+=this.talking?.5:.08;for(let i=0;i<3;i++){const xx=bx+(i-1)*br*.22,hh=this.talking?br*(.12+.55*(Math.sin(this.bp+i*1.7)+1)/2):br*.1;line(xx,by+fy-hh,xx,by+fy+hh,'#fff',w*.012)}}}
+
+const nz=t=>(t||'').replace(/[\s\W_]+/g,'').toLowerCase();
+function pieces(t,n=1200){if(t.length<=n)return[t];const o=[];let c='';for(const x of t.split(/(?<=[.!?।。\n])\s*/)){if((c+' '+x).length>n&&c){o.push(c);c=x}else c=(c+' '+x).trim()}if(c)o.push(c);return o}
+// Hosting servers are often blocked by the free translation services, a phone/PC browser is not.
+const fj=async(u)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),8000);try{return await fetch(u,{signal:c.signal})}finally{clearTimeout(t)}};
+async function browserTranslate(text,source,target){
+ try{const out=[];for(const q of pieces(text)){const r=await fj(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&dt=t&q=${encodeURIComponent(q)}`);if(!r.ok)throw 0;out.push((await r.json())[0].map(s=>s[0]).filter(Boolean).join(''))}
+  const t=out.join(' ').trim();if(t&&nz(t)!==nz(text))return t}catch(e){}
+ try{const out=[];for(const q of pieces(text,450)){const r=await fj(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(q)}&langpair=${source==='auto'?'Autodetect':source}|${target}`);const j=await r.json();
+  if(String(j.responseStatus)!=='200'||/MYMEMORY WARNING/i.test(j.responseData.translatedText))throw 0;out.push(j.responseData.translatedText)}
+  const t=out.join(' ').trim();if(t&&nz(t)!==nz(text))return t}catch(e){}
+ return ''}
+// Browser first (a phone/PC address is not blocked like a hosting server's), the server is the backup.
+async function tr(text,source,target,save=true){
+ if(!(source===target&&source!=='auto')){const t=await browserTranslate(text,source,target);
+  if(t){if(save)J('save','POST',{text,source,target,out:t}).catch(()=>{});return{ok:true,text:t}}}
+ return J('translate','POST',{text,source,target,save})}
+
+// ---------- auth ----------
+function showAuth(view='login'){stopCam();const v={
+ login:`<h2>Welcome back</h2><label>Username</label><input id="u"><label>Password</label><input id="p" type="password">
+ <div class="btns"><button onclick="doLogin()">Login</button><button class="alt" onclick="showAuth('register')">Create account</button></div>
+ <p><a onclick="showAuth('forgot')">Forgot password?</a></p>`,
+ register:`<h2>Create account</h2><label>Username</label><input id="u"><label>Email</label><input id="e"><label>Password (min 6)</label><input id="p" type="password">
+ <div class="btns"><button onclick="doReg()">Register</button><button class="alt" onclick="showAuth('login')">Back</button></div>`,
+ forgot:`<h2>Reset password</h2><label>Registered email</label><input id="e"><div class="btns"><button onclick="doForgot()">Send OTP</button><button class="alt" onclick="showAuth('login')">Back</button></div>`,
+ otp:`<h2>Enter OTP</h2><label>6-digit code sent to your email</label><input id="o" maxlength="6"><div class="btns"><button onclick="doOtp()">Verify</button></div>`,
+ newpw:`<h2>New password</h2><label>New password</label><input id="p" type="password"><div class="btns"><button onclick="doNew()">Save password</button></div>`}[view];
+ root.innerHTML=`<div id="auth"><h1>🎙️<br>VOXTRANSLATE</h1><div class="card">${v}<div class="msg" id="m"></div></div></div>`}
+let resetId=null; const M=t=>$('#m').textContent=t;
+async function doLogin(){const r=await J('login','POST',{username:$('#u').value,password:$('#p').value});r.ok?(user=r.user,showApp()):M(r.message)}
+async function doReg(){const r=await J('register','POST',{username:$('#u').value,email:$('#e').value,password:$('#p').value});
+ if(r.ok){showAuth('login');M(r.message)}else M(r.message)}
+async function doForgot(){const r=await J('forgot','POST',{email:$('#e').value});if(r.ok&&r.user_id){resetId=r.user_id;showAuth('otp');M(r.message)}else M(r.message)}
+async function doOtp(){const r=await J('verify-otp','POST',{user_id:resetId,otp:$('#o').value});r.ok?showAuth('newpw'):M(r.message)}
+async function doNew(){const r=await J('reset','POST',{user_id:resetId,password:$('#p').value});if(r.ok){showAuth('login');M('Password updated. Please log in.')}else M(r.message)}
+
+// ---------- shell ----------
+const NAV=[['🏠  Home','home'],['🔄  Conversation','conversation'],['🌐  Translate Text','translate'],['📷  Camera Translate','camera'],['📝  Text to Speech','tts'],['📜  History','history'],['⚙️  Settings','settings']];
+const SH={home:'Home',conversation:'Talk',translate:'Text',camera:'Camera',tts:'Speak',history:'History',settings:'More'};
+function showApp(){root.innerHTML=`<div id="app"><div id="side"><h1>🎙️<br>VOXTRANSLATE</h1><p>👋 Hi, ${esc(user)}</p>${NAV.map(([t,k])=>{const [e,...w]=t.split(/\s+/);return `<button data-k="${k}" onclick="go('${k}')"><span class="e">${e}</span><span class="l">${w.join(' ')}</span><span class="s">${SH[k]}</span></button>`}).join('')}</div><div id="main"></div></div>`;go('home')}
+function go(k){page=k;stopCam();if(conv)convStop();stopSpeak();AV=null;document.querySelectorAll('#side button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));P[k]()}
+const M2=h=>{AV=null;$('#main').innerHTML=h};
+const M2A=h=>{M2(`<div class="pg"><div class="pgb">${h}</div><div class="avh" id="avh"></div></div>`);AV=new Avatar($('#avh'),innerWidth<1000?62:130)};
+
+const P={
+home(){M2(`<div class="card" style="text-align:center"><div style="font-size:60px">🎙️</div><h2>Welcome to VoxTranslate</h2><p>Real-Time Two-Way Voice Translator</p>
+ <div class="btns" style="justify-content:center"><button onclick="go('conversation')">🎤 Start Conversation</button><button class="alt" onclick="go('translate')">🌐 Translate Text</button><button class="alt" onclick="go('camera')">📷 Camera Translate</button></div></div>`)},
+
+conversation(){M2A(`<h2>🔄 Conversation</h2><div class="row"><div class="card"><b>👤 Person A</b><label>Speaks</label>${langSel('la',0,'English')}</div>
+ <div class="card"><b>👤 Person B</b><label>Speaks</label>${langSel('lb',0,'Hindi')}</div></div>
+ <div class="btns" style="margin:0 0 14px"><button id="cs" onclick="convStart()">🎤 START CONVERSATION</button><button class="red hide" id="ce" onclick="convStop()">⏹ STOP</button></div>
+ <div class="msg" id="cst">🟢 Ready</div><div class="card sq" id="log" style="max-width:520px;margin:0 auto 18px;"></div>`)},
+
+translate(){M2A(`<h2>🌐 Translate Text</h2><p style="margin:-8px 0 14px;color:#CDB7E9">Translate a word, a sentence, or a full paragraph</p><div class="card">
+ <div class="btns" style="justify-content:center;margin:0 0 6px" id="modes">${['Word','Sentence','Paragraph'].map(m=>`<button data-m="${m}" onclick="setMode('${m}')" style="min-width:120px">${m}</button>`).join('')}</div>
+ <div class="row"><div><label>From</label>${langSel('s',1,'English')}</div><div><label>To</label>${langSel('t',0,'Hindi')}</div></div>
+ <div class="sqrow" style="margin-top:14px"><div><label>Input</label><textarea id="in" class="sq"></textarea></div><div><label>Translation</label><div class="out sq" id="out"></div></div></div>
+ <div class="btns"><button class="alt" onclick="speakIn()">🔊 Speak Input</button><button class="red" onclick="stopSpeak();$('#m2').textContent='⏹ Speech stopped'">⏹ Stop Speaking</button><button class="alt" onclick="swap()">⇄ Swap</button><button class="alt" onclick="navigator.clipboard.writeText($('#out').textContent)">Copy</button></div>
+ <div class="msg" id="m2"></div><div class="btns" style="justify-content:center"><button onclick="doTr()" style="min-width:260px;padding:14px">🌐 TRANSLATE</button></div></div>`);setMode(tmode)},
+
+camera(){M2A(`<h2>📷 Camera Translate</h2><div class="card"><div style="text-align:center"><video id="v" autoplay playsinline muted style="min-height:200px"></video><canvas id="cv" class="hide" style="max-width:100%;max-height:340px;border-radius:12px"></canvas></div>
+ <div class="btns"><button onclick="startCam()">🎥 Start Camera</button><button onclick="snap()">📸 Capture Photo</button><button class="alt" onclick="stopCam(true)">⏹ Stop Camera</button><button class="alt" onclick="$('#pf').click()">🖼 Photo / Gallery</button><input type="file" id="pf" accept="image/*" class="hide" onchange="upPhoto(this)"></div>
+ <div class="row"><div><label>Translate to</label>${langSel('t',0,'English')}</div><div><label>Language of text in photo</label>${langSel('pl',0,'English')}</div></div>
+ <div class="sqrow" style="margin-top:14px"><div><label>Detected text (you can edit)</label><textarea id="ocrt" class="sq"></textarea></div><div><label>Translation</label><div class="out sq" id="out"></div></div></div>
+ <div class="btns"><button onclick="camTr()">🌐 Translate</button><button class="alt" onclick="speak($('#out').textContent,$('#t').value)">🔊 Speak</button><button class="red" onclick="stopSpeak()">⏹ Stop Speaking</button></div>
+ <div class="msg" id="m2">📷 Press Start Camera, fill the frame with text (good light, hold steady), then Capture Photo</div></div>`)},
+
+tts(){M2A(`<h2>📝 Text to Speech</h2><div class="card"><label>Speak in language</label>${langSel('t',0,'English')}
+ <label>Text</label><div style="max-width:420px"><textarea id="in" class="sq" placeholder="Type text here, choose a language, then press Speak Text..."></textarea></div>
+ <div class="msg" id="m2">🟢 Ready</div><div class="btns"><button onclick="ttsGo()">🔊 SPEAK TEXT</button><button class="red" onclick="stopSpeak();$('#m2').textContent='⏹ Speech stopped'">⏹ STOP</button></div></div>`)},
+
+async history(){const h=await J('history');M2(`<h2>📜 History</h2><div class="btns" style="margin:0 0 14px"><button class="red" onclick="clr()">🗑 Clear history</button></div><div class="card">
+ ${h.length?`<table><tr><th>Time</th><th>From</th><th>To</th><th>Original</th><th>Translation</th></tr>${h.map(r=>`<tr><td>${esc(r[5])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td></tr>`).join('')}</table>`:'No translations yet.'}</div>`)},
+
+settings(){M2(`<h2>⚙️ Settings</h2><div class="card"><b>💜 Account</b><p>Signed in as ${esc(user)}</p><div class="btns"><button class="red" onclick="logout()">Log out</button></div></div>`)}
+};
+
+async function ttsGo(){const text=$('#in').value.trim(),sel=$('#t'),lang=sel.selectedOptions[0].dataset.n;if(!text)return $('#m2').textContent='⚠️ Enter text';
+ $('#m2').textContent='🔄 Translating to '+lang+'...';const r=await tr(text,'auto',sel.value,false);if(!r.ok)return $('#m2').textContent=r.message;
+ $('#in').value=r.text;$('#m2').textContent=`🔊 Speaking ${lang}...`;await speak(r.text,sel.value);$('#m2').textContent='✅ Done'}
+let tmode='Sentence';
+const HINTS={Word:'Type a single word, e.g. "beautiful"',Sentence:'Type a full sentence, e.g. "How are you today?"',Paragraph:'Paste or type a full paragraph here...'};
+function setMode(m){tmode=m;document.querySelectorAll('#modes button').forEach(b=>{const on=b.dataset.m===m;b.style.background=on?'#E83EBD':'#7B2CBF';b.style.outline=on?'2px solid #FFD9F3':'none'});
+ $('#in').placeholder=HINTS[m];$('#m2').textContent='🟢 Ready — '+HINTS[m]}
+function speakIn(){const t=$('#in').value.trim();if(!t)return $('#m2').textContent='⚠️ Nothing to speak in the input box';const l=$('#s').value==='auto'?'en':$('#s').value;$('#m2').textContent='🔊 Speaking input...';speak(t,l).then(()=>{$('#m2').textContent='🟢 Ready'})}
+async function doTr(){const text=$('#in').value.trim();if(!text)return $('#m2').textContent='⚠️ Enter some text first';
+ $('#m2').textContent=tmode==='Word'&&text.split(/\s+/).length>1?'⚠️ Multiple words detected — translating as a phrase':'🔄 Translating...';
+ const r=await tr(text,$('#s').value,$('#t').value);if(!r.ok)return $('#m2').textContent=r.message;
+ $('#out').textContent=r.text;$('#m2').textContent='🔊 Speaking translation...';await speak(r.text,$('#t').value);$('#m2').textContent='✅ Translated'}
+function swap(){const s=$('#s'),t=$('#t');if(s.value==='auto')return;[s.value,t.value]=[t.value,s.value];s.onchange();t.onchange();const i=$('#in');i.value=$('#out').textContent;$('#out').textContent=''}
+async function clr(){if(confirm('Clear all history?')){await J('history','DELETE');P.history()}}
+async function logout(){await J('logout','POST');user=null;showAuth()}
+
+// camera
+const TL={en:'eng',hi:'hin',te:'tel',ta:'tam',kn:'kan',ml:'mal',bn:'ben',mr:'mar',gu:'guj',pa:'pan',ur:'urd',ko:'kor',ja:'jpn','zh-CN':'chi_sim',fr:'fra',de:'deu',es:'spa',ru:'rus',ar:'ara',pt:'por',it:'ita'};
+function loadScript(src){return new Promise((res,rej)=>{if(window.Tesseract)return res();const t=document.createElement('script');t.src=src;t.onload=res;t.onerror=()=>rej(new Error('browser text reader could not load (check internet)'));document.head.appendChild(t)})}
+async function browserOcr(canvas,code){await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+ const w=await Tesseract.createWorker(TL[code]||'eng');try{await w.setParameters({tessedit_pageseg_mode:'6'});return ((await w.recognize(canvas)).data.text||'').trim()}finally{await w.terminate()}}
+function prep(src){const k=Math.min(2,1800/Math.max(src.width,src.height)),c=document.createElement('canvas');c.width=Math.round(src.width*k);c.height=Math.round(src.height*k);
+ const x=c.getContext('2d');try{x.filter='grayscale(1) contrast(1.35)'}catch(e){}x.drawImage(src,0,0,c.width,c.height);return c}
+async function readPhoto(c){$('#m2').textContent='🔄 Reading text from image...';$('#out').textContent='';const p=prep(c);let text='',err='';
+ const o=await J('ocr','POST',{image:p.toDataURL('image/jpeg',.9),lang:$('#pl').value});
+ if(o.ok)text=o.text;else if(!o.fallback)return $('#m2').textContent=o.message;
+ if(!text){$('#m2').textContent='🔄 Trying the browser text reader (first use downloads language data)...';try{text=await browserOcr(p,$('#pl').value)}catch(e){err=e&&e.message||String(e)}}
+ $('#ocrt').value=text;if(!text)return $('#m2').textContent=err?'❌ '+err:'⚠️ No text found. Try: more light, hold steady, fill the frame with the text, and choose the right "Language of text in photo".';
+ await camTr()}
+function upPhoto(i){const f=i.files[0];if(!f)return;const im=new Image();im.onload=()=>{const c=$('#cv'),k=Math.min(1,1800/Math.max(im.naturalWidth,im.naturalHeight));
+ c.width=Math.round(im.naturalWidth*k);c.height=Math.round(im.naturalHeight*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);c.classList.remove('hide');$('#v').classList.add('hide');stopCam();URL.revokeObjectURL(im.src);readPhoto(c)};im.src=URL.createObjectURL(f);i.value=''}
+async function startCam(){stopCam();try{camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+ const v=$('#v');v.srcObject=camStream;v.classList.remove('hide');$('#cv').classList.add('hide');
+ try{await camStream.getVideoTracks()[0].applyConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){}
+ $('#m2').textContent='🎥 Camera live — fill the frame with text, hold steady, then Capture Photo'}
+ catch(e){$('#m2').textContent='❌ Camera unavailable: allow camera access (needs https or localhost).'}}
+function stopCam(say){camStream&&camStream.getTracks().forEach(t=>t.stop());camStream=null;if(say){stopSpeak();const m=$('#m2');m&&(m.textContent='⏹ Camera and speech stopped — captured text is kept below')}}
+async function snap(){const v=$('#v');if(!camStream||!v.videoWidth)return $('#m2').textContent='⚠️ Start the camera first';
+ const c=$('#cv');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.classList.remove('hide');v.classList.add('hide');await readPhoto(c)}
+async function camTr(){const t=$('#ocrt').value.trim();if(!t)return $('#m2').textContent='⚠️ No text to translate — capture some text first';
+ $('#m2').textContent='🔄 Translating...';const r=await tr(t,'auto',$('#t').value);if(!r.ok)return $('#m2').textContent=r.message;
+ $('#out').textContent=r.text;$('#m2').textContent='✅ Translated — speaking...';await speak(r.text,$('#t').value);$('#m2').textContent='✅ Done'}
+
+// conversation (A and B take turns)
+async function convStart(){const A=$('#la'),B=$('#lb');conv={run:true,rec:null};$('#cs').classList.add('hide');$('#ce').classList.remove('hide');let turn='A';
+ const alive=()=>conv&&conv.run,name=e=>e.selectedOptions[0].dataset.n;
+ while(alive()){const from=turn==='A'?A:B,to=turn==='A'?B:A;$('#cst').textContent=`🎤 Person ${turn} (${name(from)}) speaking...`;
+  let said='';try{said=await listen(from.value)}catch(e){if(!alive())break;if(e.msg)$('#cst').textContent='❌ '+e.msg;if(e.fatal)break;await sleep(e.msg?1500:200);continue}
+  if(!alive())break;if(!said){$('#cst').textContent=`❌ Didn't catch that (${name(from)}) — try speaking again`;await sleep(300);continue}
+  $('#cst').textContent='🔄 Translating...';const r=await tr(said,from.value,to.value);if(!alive())break;
+  if(!r.ok){$('#cst').textContent=r.message;await sleep(800);continue}
+  $('#log').insertAdjacentHTML('beforeend',`<div class="bubble ${turn}"><small>🗣 Person ${turn} · ${esc(name(from))}</small><div>${esc(said)}</div><small style="color:#FFD9F3">🌐 ${esc(name(to))}</small><div><b>${esc(r.text)}</b></div></div>`);$('#log').scrollTop=$('#log').scrollHeight;
+  $('#cst').textContent=`🔊 Speaking (${name(to)})...`;await speak(r.text,to.value);turn=turn==='A'?'B':'A'}
+ if(conv)convStop()}
+function convStop(){if(!conv)return;conv.run=false;try{conv.rec&&conv.rec.abort()}catch(e){}conv=null;stopSpeak();
+ if($('#cs')){$('#cs').classList.remove('hide');$('#ce').classList.add('hide');$('#cst').textContent='Stopped.'}}
+
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+(async()=>{LANGS=await J('languages');const m=await J('me');user=m.user;user?showApp():showAuth()})();
+</script></body></html>
